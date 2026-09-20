@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'infinite_horizon_project.zip'
-      - '.github/workflows/build.yml'
+      - ".github/workflows/build.yml"
 
 jobs:
   build:
@@ -18,30 +17,57 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools'
+          packages: "platform-tools"
 
-      - name: Install Android build tools
+      - name: Install Android toolchain
         shell: bash
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager \
+          set -e
+
+          # Accept Android SDK licenses.
+          # sdkmanager may close the pipe early after accepting them,
+          # so do not let the 'yes' process make the step fail.
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
+          # Install the exact toolchain used by the current
+          # LeviLauncher Android native-mod template.
+          sdkmanager --install \
             "platforms;android-28" \
             "cmake;3.22.1" \
             "ndk;28.2.13676358"
 
-      - name: Extract project
+          # Verify the important files actually exist.
+          test -f "$ANDROID_HOME/ndk/28.2.13676358/build/cmake/android.toolchain.cmake"
+          test -x "$ANDROID_HOME/cmake/3.22.1/bin/cmake"
+
+          echo "Android toolchain ready."
+
+      - name: Download LeviLauncher Android mod template
         shell: bash
         run: |
-          rm -rf project
-          mkdir project
-          unzip -q infinite_horizon_project.zip -d project
+          set -e
 
-      - name: Configure
+          rm -rf project template.zip
+
+          curl -L --fail --retry 5 --retry-delay 2 \
+            "https://github.com/QYCottage/levilauncher-android-mod-template/archive/refs/heads/main.zip" \
+            -o template.zip
+
+          unzip -q template.zip
+
+          mv levilauncher-android-mod-template-main project
+
+          test -f project/CMakeLists.txt
+          test -f project/manifest.json.in
+
+          echo "Template downloaded successfully."
+
+      - name: Configure Infinite Horizon
         shell: bash
         run: |
-          cd project
+          set -e
 
-          cmake -S . -B build -G Ninja \
+          cmake -S project -B project/build-arm64-v8a -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/28.2.13676358/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-28 \
@@ -51,17 +77,36 @@ jobs:
             -DMOD_AUTHOR="AQ Explains" \
             -DMOD_VERSION=0.1.0 \
             -DMOD_LIBRARY_NAME=infinite_horizon \
-            '-DMOD_MINECRAFT_VERSIONS=["1.26.*"]'
+            '-DMOD_MINECRAFT_VERSIONS=["1.26.*"]' \
+            "-DMOD_ICON="
 
-      - name: Build package
+      - name: Build LeviPack
         shell: bash
         run: |
-          cd project
-          cmake --build build --target levi_package --parallel 2
+          set -e
 
-      - name: Upload .levipack
+          cmake --build project/build-arm64-v8a \
+            --target levi_package \
+            --parallel 2
+
+      - name: Verify LeviPack
+        shell: bash
+        run: |
+          set -e
+
+          echo "Generated files:"
+          find project/build-arm64-v8a -maxdepth 1 -type f -name "*.levipack" -print
+
+          PACK=$(find project/build-arm64-v8a -maxdepth 1 -type f -name "*.levipack" | head -n 1)
+
+          test -n "$PACK"
+
+          echo "LeviPack created:"
+          echo "$PACK"
+
+      - name: Upload LeviPack
         uses: actions/upload-artifact@v4
         with:
           name: infinite-horizon-0.1.0-arm64
-          path: project/build/*.levipack
+          path: project/build-arm64-v8a/*.levipack
           if-no-files-found: error
