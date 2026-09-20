@@ -23,7 +23,7 @@ jobs:
       - name: Install Android build tools
         shell: bash
         run: |
-          yes | sdkmanager --licenses
+          yes | sdkmanager --licenses || true
           sdkmanager \
             "platforms;android-28" \
             "cmake;3.22.1" \
