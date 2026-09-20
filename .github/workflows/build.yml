@@ -1,1 +1,63 @@
+name: Build Infinite Horizon
 
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'infinite_horizon_project.zip'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build tools
+        shell: bash
+        run: |
+          sdkmanager "platforms;android-28" "cmake;3.22.1" "ndk;28.2.13676358"
+
+      - name: Extract project
+        shell: bash
+        run: |
+          rm -rf project
+          mkdir project
+          unzip -q infinite_horizon_project.zip -d project
+
+      - name: Configure
+        shell: bash
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+        run: |
+          cd project
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-28 \
+            -DANDROID_STL=c++_shared \
+            -DMOD_ID=infinite_horizon \
+            -DMOD_NAME="Infinite Horizon" \
+            -DMOD_AUTHOR="AQ Explains" \
+            -DMOD_VERSION=0.1.0 \
+            -DMOD_LIBRARY_NAME=infinite_horizon \
+            '-DMOD_MINECRAFT_VERSIONS=["1.26.*"]'
+
+      - name: Build package
+        shell: bash
+        run: |
+          cd project
+          cmake --build build --target levi_package --parallel 2
+
+      - name: Upload .levipack
+        uses: actions/upload-artifact@v4
+        with:
+          name: infinite-horizon-0.1.0-arm64
+          path: project/build/*.levipack
+          if-no-files-found: error
