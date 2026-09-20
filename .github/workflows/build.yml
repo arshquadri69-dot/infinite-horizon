@@ -106,7 +106,8 @@ jobs:
           )
 
           target_link_libraries(${MOD_LIBRARY_NAME} PRIVATE
-            preloader
+          preloader
+          log
           )
 
           if(CMAKE_STRIP)
