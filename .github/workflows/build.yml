@@ -1,4 +1,4 @@
-name: Build Infinite Horizon
+name: Build Infinite Horizon v0.2
 
 on:
   workflow_dispatch:
@@ -9,7 +9,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,28 +22,22 @@ jobs:
         shell: bash
         run: |
           set -e
-
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-
           sdkmanager --install \
             "platforms;android-28" \
             "cmake;3.22.1" \
             "ndk;28.2.13676358"
-
           test -f "$ANDROID_HOME/ndk/28.2.13676358/build/cmake/android.toolchain.cmake"
           test -x "$ANDROID_HOME/cmake/3.22.1/bin/cmake"
-
-          echo "Android toolchain ready."
 
       - name: Create Infinite Horizon project
         shell: bash
         run: |
           set -e
-
           rm -rf project
-          mkdir -p project/src project/config
+          mkdir -p project/src
 
-          cat > project/CMakeLists.txt <<'EOF'
+          cat > project/CMakeLists.txt <<'CMAKE_EOF'
           cmake_minimum_required(VERSION 3.22)
           project(infinite_horizon_android LANGUAGES CXX)
 
@@ -56,191 +49,62 @@ jobs:
           set(MOD_ID "infinite_horizon" CACHE STRING "LeviLauncher mod id")
           set(MOD_NAME "Infinite Horizon" CACHE STRING "LeviLauncher mod name")
           set(MOD_AUTHOR "AQ Explains" CACHE STRING "Mod author")
-          set(MOD_VERSION "0.1.0" CACHE STRING "Mod version")
+          set(MOD_VERSION "0.2.0" CACHE STRING "Mod version")
           set(MOD_LIBRARY_NAME "infinite_horizon" CACHE STRING "Native library name")
-          set(MOD_MINECRAFT_VERSIONS "[\"1.26.*\"]" CACHE STRING "Supported Minecraft versions")
+          set(MOD_MINECRAFT_VERSIONS "[\"1.26.5X.X\"]" CACHE STRING "Supported Minecraft versions")
 
           include(FetchContent)
-
           FetchContent_Declare(
             preloader_android
             GIT_REPOSITORY https://github.com/LiteLDev/preloader-android.git
             GIT_TAG 0.2.2
             SOURCE_SUBDIR cmake/preloader-sdk
           )
-
           FetchContent_MakeAvailable(preloader_android)
 
           FetchContent_GetProperties(preloader_android)
-          set(
-            LEVI_PRELOADER_INCLUDE_DIR
-            "${preloader_android_SOURCE_DIR}/include"
-          )
-
+          set(LEVI_PRELOADER_INCLUDE_DIR "${preloader_android_SOURCE_DIR}/include")
           if(NOT TARGET preloader)
-            add_subdirectory(
-              "${preloader_android_SOURCE_DIR}"
-              "${CMAKE_BINARY_DIR}/_preloader_android"
-            )
+            add_subdirectory("${preloader_android_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/_preloader_android")
           endif()
 
-          add_library(${MOD_LIBRARY_NAME} SHARED
-            src/main.cpp
-          )
-
-          set_target_properties(${MOD_LIBRARY_NAME} PROPERTIES
-            OUTPUT_NAME "${MOD_LIBRARY_NAME}"
-          )
-
-          target_include_directories(${MOD_LIBRARY_NAME} PRIVATE
-            "${LEVI_PRELOADER_INCLUDE_DIR}"
-          )
-
+          add_library(${MOD_LIBRARY_NAME} SHARED src/main.cpp)
+          target_include_directories(${MOD_LIBRARY_NAME} PRIVATE "${LEVI_PRELOADER_INCLUDE_DIR}")
           target_compile_options(${MOD_LIBRARY_NAME} PRIVATE
             -fvisibility=hidden
             -fvisibility-inlines-hidden
+            -Wall -Wextra -Wpedantic
           )
-
-          target_link_options(${MOD_LIBRARY_NAME} PRIVATE
-            "-Wl,-z,max-page-size=16384"
-          )
-
-          target_link_libraries(${MOD_LIBRARY_NAME} PRIVATE
-          preloader
-          log
-          )
+          target_link_options(${MOD_LIBRARY_NAME} PRIVATE "-Wl,-z,max-page-size=16384")
+          target_link_libraries(${MOD_LIBRARY_NAME} PRIVATE preloader log dl)
 
           if(CMAKE_STRIP)
             add_custom_command(TARGET ${MOD_LIBRARY_NAME} POST_BUILD
-              COMMAND "${CMAKE_STRIP}"
-              --strip-unneeded
-              "$<TARGET_FILE:${MOD_LIBRARY_NAME}>"
+              COMMAND "${CMAKE_STRIP}" --strip-unneeded "$<TARGET_FILE:${MOD_LIBRARY_NAME}>"
               VERBATIM
             )
           endif()
 
-          configure_file(
-            "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json.in"
-            "${CMAKE_CURRENT_BINARY_DIR}/manifest.json"
-            @ONLY
-          )
+          configure_file("${CMAKE_CURRENT_SOURCE_DIR}/manifest.json.in"
+                         "${CMAKE_CURRENT_BINARY_DIR}/manifest.json" @ONLY)
 
-          set(LEVI_PACKAGE_ROOT
-            "${CMAKE_CURRENT_BINARY_DIR}/package"
-          )
-
-          set(LEVI_PACKAGE_MOD_DIR
-            "${LEVI_PACKAGE_ROOT}/${MOD_ID}"
-          )
-
-          set(LEVI_PACKAGE_FILE
-            "${CMAKE_CURRENT_BINARY_DIR}/${MOD_ID}-${MOD_VERSION}-${CMAKE_ANDROID_ARCH_ABI}.levipack"
-          )
+          set(PACK_ROOT "${CMAKE_CURRENT_BINARY_DIR}/package")
+          set(PACK_MOD_DIR "${PACK_ROOT}/${MOD_ID}")
+          set(PACK_FILE "${CMAKE_CURRENT_BINARY_DIR}/${MOD_ID}-${MOD_VERSION}-${CMAKE_ANDROID_ARCH_ABI}.levipack")
 
           add_custom_target(levi_package
-            COMMAND "${CMAKE_COMMAND}" -E rm -rf
-              "${LEVI_PACKAGE_ROOT}"
-
-            COMMAND "${CMAKE_COMMAND}" -E make_directory
-              "${LEVI_PACKAGE_MOD_DIR}"
-
-            COMMAND "${CMAKE_COMMAND}" -E copy
-              "$<TARGET_FILE:${MOD_LIBRARY_NAME}>"
-              "${LEVI_PACKAGE_MOD_DIR}/lib${MOD_LIBRARY_NAME}.so"
-
-            COMMAND "${CMAKE_COMMAND}" -E copy
-              "${CMAKE_CURRENT_BINARY_DIR}/manifest.json"
-              "${LEVI_PACKAGE_MOD_DIR}/manifest.json"
-
-            COMMAND "${CMAKE_COMMAND}" -E chdir
-              "${LEVI_PACKAGE_ROOT}"
-              "${CMAKE_COMMAND}" -E tar
-              "cf"
-              "${LEVI_PACKAGE_FILE}"
-              --format=zip
-              "${MOD_ID}"
-
-            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-
+            COMMAND "${CMAKE_COMMAND}" -E rm -rf "${PACK_ROOT}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${PACK_MOD_DIR}"
+            COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:${MOD_LIBRARY_NAME}>" "${PACK_MOD_DIR}/lib${MOD_LIBRARY_NAME}.so"
+            COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_BINARY_DIR}/manifest.json" "${PACK_MOD_DIR}/manifest.json"
+            COMMAND "${CMAKE_COMMAND}" -E chdir "${PACK_ROOT}" "${CMAKE_COMMAND}" -E tar cf "${PACK_FILE}" --format=zip "${MOD_ID}"
             DEPENDS ${MOD_LIBRARY_NAME}
-
-            COMMENT "Packaging ${MOD_ID}"
-
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
             VERBATIM
           )
-          EOF
+          CMAKE_EOF
 
-          cat > project/src/main.cpp <<'EOF'
-          #include <pl/Mod.hpp>
-
-          #include <filesystem>
-
-          class InfiniteHorizonMod {
-          public:
-              static InfiniteHorizonMod& instance() {
-                  static InfiniteHorizonMod mod;
-                  return mod;
-              }
-
-              InfiniteHorizonMod()
-                  : mSelf(*ll::mod::NativeMod::current()) {}
-
-              [[nodiscard]]
-              ll::mod::NativeMod& getSelf() const {
-                  return mSelf;
-              }
-
-              bool load() {
-                  auto& self = getSelf();
-
-                  std::error_code ec;
-                  std::filesystem::create_directories(
-                      self.getDataDir(),
-                      ec
-                  );
-
-                  self.getLogger().info(
-                      "Infinite Horizon 0.1.0 loaded"
-                  );
-
-                  return true;
-              }
-
-              bool enable() {
-                  getSelf().getLogger().info(
-                      "Infinite Horizon enabled"
-                  );
-
-                  return true;
-              }
-
-              bool disable() {
-                  getSelf().getLogger().info(
-                      "Infinite Horizon disabled"
-                  );
-
-                  return true;
-              }
-
-              bool unload() {
-                  getSelf().getLogger().info(
-                      "Infinite Horizon unloaded"
-                  );
-
-                  return true;
-              }
-
-          private:
-              ll::mod::NativeMod& mSelf;
-          };
-
-          PL_REGISTER_MOD(
-              InfiniteHorizonMod,
-              InfiniteHorizonMod::instance()
-          )
-          EOF
-
-          cat > project/manifest.json.in <<'EOF'
+          cat > project/manifest.json.in <<'MANIFEST_EOF'
           {
             "type": "preload-native",
             "name": "@MOD_NAME@",
@@ -250,7 +114,608 @@ jobs:
             "icon": "",
             "minecraft_versions": @MOD_MINECRAFT_VERSIONS@
           }
-          EOF
+          MANIFEST_EOF
+
+          cat > project/src/main.cpp <<'CPP_EOF'
+          #include <pl/Mod.hpp>
+          #include <pl/memory/Hook.hpp>
+          #include <pl/memory/Signature.hpp>
+          
+          #include <algorithm>
+          #include <atomic>
+          #include <chrono>
+          #include <cmath>
+          #include <condition_variable>
+          #include <cstdint>
+          #include <dlfcn.h>
+          #include <filesystem>
+          #include <fstream>
+          #include <mutex>
+          #include <string>
+          #include <string_view>
+          #include <thread>
+          #include <unordered_map>
+          #include <utility>
+          #include <vector>
+          
+          namespace {
+          
+          // These ARM64 signatures are copied from the current public BedrockTools
+          // 1.26.5X.X signature set. Infinite Horizon keeps them locally so it has no
+          // runtime dependency on BedrockTools.
+          constexpr std::string_view kSigNormalTick =
+              "? ? ? FC ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? D1 54 D0 3B D5 F3 03 00 AA ? ? ? F9 ? ? ? F8 ? ? ? 39";
+          constexpr std::string_view kSigRenderLevel =
+              "? ? ? FC ? ? ? 6D ? ? ? 6D ? ? ? 6D ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? D1 57 D0 3B D5";
+          constexpr std::string_view kSigTessBegin =
+              "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? 39 ? ? ? 39 08 01 09 2A";
+          constexpr std::string_view kSigTessColor =
+              "? ? ? 52 ? ? ? 39 04 01 27 1E";
+          constexpr std::string_view kSigTessVertex =
+              "? ? ? D1 ? ? ? FD ? ? ? 6D ? ? ? A9 ? ? ? F9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 58 D0 3B D5 ? ? ? F9";
+          constexpr std::string_view kSigRenderMesh2 =
+              "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 57 D0 3B D5 F6 03 00 AA E0 03 01 AA ? ? ? F9 F4 03 03 AA";
+          constexpr std::string_view kSigGetBlock =
+              "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 56 D0 3B D5 ? ? ? F9 ? ? ? F9 ? ? ? B9 ? ? ? 79 1F 01 09 6B ? ? ? 54 ? ? ? 79 F3 03 00 AA 1F 01 09 6B ? ? ? 54 E0 03 00 91";
+          constexpr std::string_view kSigSolidBlock =
+              "? ? ? F9 ? ? ? B9 ? ? ? 29 ? ? ? F9 E1 03 08 2A";
+          
+          struct Vec3 {
+              float x;
+              float y;
+              float z;
+          };
+          
+          struct BlockPos {
+              int x;
+              int y;
+              int z;
+          };
+          
+          struct HeightSample {
+              float x;
+              float y;
+              float z;
+              bool valid;
+          };
+          
+          using NormalTickFn = void (*)(void*);
+          using RenderLevelFn = void (*)(void*, void*, void*);
+          using TessBeginFn = void (*)(void*, void*, int, int, int);
+          using TessColorFn = void (*)(void*, float, float, float, float);
+          using TessVertexFn = void (*)(void*, float, float, float);
+          using RenderMeshFn = void (*)(void*, void*, void*, char*);
+          using GetBlockFn = void* (*)(void*, const BlockPos&);
+          using IsSolidBlockFn = bool (*)(void*, const BlockPos&);
+          
+          NormalTickFn g_tickOriginal = nullptr;
+          RenderLevelFn g_renderLevelOriginal = nullptr;
+          
+          TessBeginFn g_tessBegin = nullptr;
+          TessColorFn g_tessColor = nullptr;
+          TessVertexFn g_tessVertex = nullptr;
+          RenderMeshFn g_renderMesh = nullptr;
+          GetBlockFn g_getBlock = nullptr;
+          IsSolidBlockFn g_isSolid = nullptr;
+          
+          pl::memory::HookHandle g_tickHook;
+          pl::memory::HookHandle g_renderHook;
+          pl::memory::HookHandle g_dlopenHook;
+          
+          void* (*g_dlopenOriginal)(const char*, int) = nullptr;
+          
+          std::atomic<void*> g_localPlayer{nullptr};
+          std::atomic<bool> g_runtimeReady{false};
+          std::atomic<bool> g_renderHooked{false};
+          std::atomic<bool> g_stopWorker{false};
+          std::atomic<bool> g_resolving{false};
+          
+          std::atomic<std::uint64_t> g_frameCount{0};
+          std::atomic<std::uint64_t> g_renderedFrameCount{0};
+          std::atomic<std::uint64_t> g_sampleCount{0};
+          
+          std::mutex g_dataMutex;
+          std::unordered_map<std::int64_t, HeightSample> g_samples;
+          
+          std::mutex g_saveMutex;
+          std::condition_variable g_saveCv;
+          std::atomic<bool> g_saveRequested{false};
+          std::thread g_saveWorker;
+          std::filesystem::path g_dataRoot;
+          
+          // First visible prototype: a coarse height-field around the player. The final
+          // project will replace this wireframe with a real hierarchical solid LOD mesh.
+          constexpr int kSampleSpacing = 8;
+          constexpr int kSampleRadius = 512;
+          constexpr int kRenderRadius = 512;
+          constexpr int kWorldMinY = -64;
+          constexpr int kWorldMaxY = 319;
+          constexpr int kSamplesPerPlayerTick = 1;
+          constexpr int kMaxRenderedVertices = 12000;
+          constexpr std::chrono::seconds kSaveInterval{10};
+          
+          constexpr std::size_t kActorStateVector = 0x208;
+          constexpr std::size_t kActorDimension = 448;
+          constexpr std::size_t kDimensionBlockSource = 208;
+          constexpr std::size_t kLevelRendererPlayer = 0x420;
+          constexpr std::size_t kCamPos = 0x61C;
+          constexpr std::size_t kScreenTessellator = 0xB8;
+          constexpr std::size_t kSelectionMaterial = 0x1030;
+          
+          std::int64_t sampleKey(int x, int z) {
+              return (static_cast<std::int64_t>(x) << 32) ^ static_cast<std::uint32_t>(z);
+          }
+          
+          int floorDiv(int a, int b) {
+              int q = a / b;
+              int r = a % b;
+              if (r != 0 && ((r < 0) != (b < 0))) --q;
+              return q;
+          }
+          
+          std::vector<std::pair<int, int>> buildOffsets() {
+              std::vector<std::pair<int, int>> offsets;
+              offsets.reserve(17000);
+              for (int dx = -kSampleRadius; dx <= kSampleRadius; dx += kSampleSpacing) {
+                  for (int dz = -kSampleRadius; dz <= kSampleRadius; dz += kSampleSpacing) {
+                      offsets.emplace_back(dx, dz);
+                  }
+              }
+              std::sort(offsets.begin(), offsets.end(), [](const auto& a, const auto& b) {
+                  const auto da = static_cast<std::int64_t>(a.first) * a.first + static_cast<std::int64_t>(a.second) * a.second;
+                  const auto db = static_cast<std::int64_t>(b.first) * b.first + static_cast<std::int64_t>(b.second) * b.second;
+                  return da < db;
+              });
+              return offsets;
+          }
+          
+          const auto g_sampleOffsets = buildOffsets();
+          
+          class SampleStore {
+          public:
+              void setRoot(const std::filesystem::path& root) { g_dataRoot = root; }
+          
+              bool get(int x, int z, HeightSample& out) {
+                  std::lock_guard lock(g_dataMutex);
+                  const auto it = g_samples.find(sampleKey(x, z));
+                  if (it == g_samples.end()) return false;
+                  out = it->second;
+                  return true;
+              }
+          
+              void set(int x, int z, float y) {
+                  std::lock_guard lock(g_dataMutex);
+                  g_samples[sampleKey(x, z)] = HeightSample{
+                      static_cast<float>(x), y, static_cast<float>(z), true};
+              }
+          
+              std::size_t size() const {
+                  std::lock_guard lock(g_dataMutex);
+                  return g_samples.size();
+              }
+          
+              void load() {
+                  std::filesystem::create_directories(g_dataRoot);
+                  const auto path = g_dataRoot / "terrain_v02.bin";
+                  std::ifstream in(path, std::ios::binary);
+                  if (!in) return;
+          
+                  std::uint32_t magic = 0;
+                  std::uint32_t version = 0;
+                  std::uint32_t count = 0;
+                  in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+                  in.read(reinterpret_cast<char*>(&version), sizeof(version));
+                  in.read(reinterpret_cast<char*>(&count), sizeof(count));
+          
+                  if (!in || magic != 0x49484C44u || version != 2 || count > 1000000u) return;
+          
+                  std::lock_guard lock(g_dataMutex);
+                  g_samples.clear();
+                  g_samples.reserve(count);
+                  for (std::uint32_t i = 0; i < count; ++i) {
+                      HeightSample s{};
+                      in.read(reinterpret_cast<char*>(&s), sizeof(s));
+                      if (!in) break;
+                      if (!s.valid) continue;
+                      g_samples[sampleKey(static_cast<int>(s.x), static_cast<int>(s.z))] = s;
+                  }
+              }
+          
+              void requestSave() {
+                  g_saveRequested.store(true, std::memory_order_release);
+                  g_saveCv.notify_one();
+              }
+          
+              void stopAndFlush() {
+                  requestSave();
+                  g_stopWorker.store(true, std::memory_order_release);
+                  g_saveCv.notify_all();
+                  if (g_saveWorker.joinable()) g_saveWorker.join();
+              }
+          
+              void startWorker() {
+                  if (g_saveWorker.joinable()) return;
+                  g_stopWorker.store(false, std::memory_order_release);
+                  g_saveWorker = std::thread([this] { workerLoop(); });
+              }
+          
+          private:
+              void workerLoop() {
+                  auto nextPeriodic = std::chrono::steady_clock::now() + kSaveInterval;
+                  while (!g_stopWorker.load(std::memory_order_acquire)) {
+                      std::unique_lock lock(g_saveMutex);
+                      g_saveCv.wait_until(lock, nextPeriodic, [&] {
+                          return g_stopWorker.load(std::memory_order_acquire)
+                              || g_saveRequested.load(std::memory_order_acquire);
+                      });
+                      lock.unlock();
+          
+                      if (g_saveRequested.exchange(false, std::memory_order_acq_rel)
+                          || std::chrono::steady_clock::now() >= nextPeriodic) {
+                          saveSnapshot();
+                          nextPeriodic = std::chrono::steady_clock::now() + kSaveInterval;
+                      }
+                  }
+          
+                  saveSnapshot();
+              }
+          
+              void saveSnapshot() {
+                  std::vector<HeightSample> snapshot;
+                  {
+                      std::lock_guard lock(g_dataMutex);
+                      snapshot.reserve(g_samples.size());
+                      for (const auto& [_, sample] : g_samples) snapshot.push_back(sample);
+                  }
+          
+                  std::filesystem::create_directories(g_dataRoot);
+                  const auto path = g_dataRoot / "terrain_v02.bin";
+                  const auto tmp = g_dataRoot / "terrain_v02.bin.tmp";
+          
+                  std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+                  if (!out) return;
+          
+                  const std::uint32_t magic = 0x49484C44u;
+                  const std::uint32_t version = 2;
+                  const std::uint32_t count = static_cast<std::uint32_t>(std::min<std::size_t>(snapshot.size(), 1000000));
+          
+                  out.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+                  out.write(reinterpret_cast<const char*>(&version), sizeof(version));
+                  out.write(reinterpret_cast<const char*>(&count), sizeof(count));
+                  out.write(reinterpret_cast<const char*>(snapshot.data()),
+                            static_cast<std::streamsize>(count * sizeof(HeightSample)));
+                  out.close();
+          
+                  std::error_code ec;
+                  std::filesystem::rename(tmp, path, ec);
+                  if (ec) {
+                      std::filesystem::remove(path, ec);
+                      ec.clear();
+                      std::filesystem::rename(tmp, path, ec);
+                  }
+              }
+          };
+          
+          SampleStore g_store;
+          std::size_t g_sampleCursor = 0;
+          
+          std::uintptr_t resolvedAddress(const std::unordered_map<std::string, std::uintptr_t>& resolved,
+                                         std::string_view signature) {
+              const auto it = resolved.find(std::string(signature));
+              return it == resolved.end() ? 0 : it->second;
+          }
+          
+          bool sampleColumn(int x, int z, void* region, float& outY) {
+              if (!region || !g_isSolid) return false;
+          
+              // Coarse top-down search, then local refinement. The sampling is deliberately
+              // done on the Minecraft tick thread because BlockSource is game-state data
+              // and should not be queried from a worker thread.
+              int found = kWorldMinY - 1;
+              for (int y = kWorldMaxY; y >= kWorldMinY; y -= 4) {
+                  if (g_isSolid(region, BlockPos{x, y, z})) {
+                      found = y;
+                      break;
+                  }
+              }
+          
+              if (found < kWorldMinY) return false;
+          
+              for (int y = std::min(kWorldMaxY, found + 3); y >= std::max(kWorldMinY, found - 3); --y) {
+                  if (g_isSolid(region, BlockPos{x, y, z})) {
+                      outY = static_cast<float>(y + 1);
+                      return true;
+                  }
+              }
+          
+              outY = static_cast<float>(found + 1);
+              return true;
+          }
+          
+          void sampleOneNearbyColumn(void* player) {
+              if (!player || !g_runtimeReady.load(std::memory_order_acquire)) return;
+          
+              const auto dimension = *reinterpret_cast<std::uintptr_t*>(
+                  reinterpret_cast<std::uintptr_t>(player) + kActorDimension);
+              if (!dimension) return;
+          
+              const auto region = *reinterpret_cast<std::uintptr_t*>(dimension + kDimensionBlockSource);
+              if (!region) return;
+          
+              const auto stateVector = *reinterpret_cast<std::uintptr_t*>(
+                  reinterpret_cast<std::uintptr_t>(player) + kActorStateVector);
+              if (!stateVector) return;
+          
+              const auto pos = *reinterpret_cast<Vec3*>(stateVector);
+              const int centerX = static_cast<int>(std::floor(pos.x / kSampleSpacing)) * kSampleSpacing;
+              const int centerZ = static_cast<int>(std::floor(pos.z / kSampleSpacing)) * kSampleSpacing;
+          
+              for (int attempt = 0; attempt < kSamplesPerPlayerTick; ++attempt) {
+                  if (g_sampleOffsets.empty()) return;
+                  const auto [dx, dz] = g_sampleOffsets[g_sampleCursor++ % g_sampleOffsets.size()];
+                  const int x = centerX + dx;
+                  const int z = centerZ + dz;
+          
+                  HeightSample existing{};
+                  if (g_store.get(x, z, existing)) continue;
+          
+                  float y = 0.0f;
+                  if (sampleColumn(x, z, reinterpret_cast<void*>(region), y)) {
+                      g_store.set(x, z, y);
+                      ++g_sampleCount;
+                  }
+              }
+          }
+          
+          void renderHeightField(void* levelRenderer, void* screenContext) {
+              if (!levelRenderer || !screenContext || !g_tessBegin || !g_tessColor
+                  || !g_tessVertex || !g_renderMesh) return;
+          
+              const auto playerRenderer = *reinterpret_cast<std::uintptr_t*>(
+                  reinterpret_cast<std::uintptr_t>(levelRenderer) + kLevelRendererPlayer);
+              if (!playerRenderer) return;
+          
+              const float camX = *reinterpret_cast<float*>(playerRenderer + kCamPos + 0);
+              const float camY = *reinterpret_cast<float*>(playerRenderer + kCamPos + 4);
+              const float camZ = *reinterpret_cast<float*>(playerRenderer + kCamPos + 8);
+          
+              const auto tess = *reinterpret_cast<std::uintptr_t*>(
+                  reinterpret_cast<std::uintptr_t>(screenContext) + kScreenTessellator);
+              if (!tess) return;
+          
+              // BedrockTools uses the LevelRendererPlayer selection material as a safe,
+              // version-appropriate world material for Tessellator debug geometry.
+              void* material = reinterpret_cast<void*>(playerRenderer + kSelectionMaterial);
+          
+              struct Edge {
+                  HeightSample a;
+                  HeightSample b;
+              };
+          
+              std::vector<Edge> edges;
+              edges.reserve(kMaxRenderedVertices / 2);
+          
+              const int minX = static_cast<int>(std::floor(camX)) - kRenderRadius;
+              const int maxX = static_cast<int>(std::floor(camX)) + kRenderRadius;
+              const int minZ = static_cast<int>(std::floor(camZ)) - kRenderRadius;
+              const int maxZ = static_cast<int>(std::floor(camZ)) + kRenderRadius;
+          
+              const int sx0 = floorDiv(minX, kSampleSpacing) * kSampleSpacing;
+              const int sz0 = floorDiv(minZ, kSampleSpacing) * kSampleSpacing;
+          
+              {
+                  std::lock_guard lock(g_dataMutex);
+                  if (g_samples.empty()) return;
+          
+                  for (int x = sx0; x <= maxX; x += kSampleSpacing) {
+                      for (int z = sz0; z <= maxZ; z += kSampleSpacing) {
+                          const auto it = g_samples.find(sampleKey(x, z));
+                          if (it == g_samples.end() || !it->second.valid) continue;
+          
+                          if (x + kSampleSpacing <= maxX) {
+                              const auto jt = g_samples.find(sampleKey(x + kSampleSpacing, z));
+                              if (jt != g_samples.end() && jt->second.valid) edges.push_back({it->second, jt->second});
+                          }
+                          if (z + kSampleSpacing <= maxZ) {
+                              const auto jt = g_samples.find(sampleKey(x, z + kSampleSpacing));
+                              if (jt != g_samples.end() && jt->second.valid) edges.push_back({it->second, jt->second});
+                          }
+          
+                          if (edges.size() * 2 >= static_cast<std::size_t>(kMaxRenderedVertices)) break;
+                      }
+                      if (edges.size() * 2 >= static_cast<std::size_t>(kMaxRenderedVertices)) break;
+                  }
+              }
+          
+              if (edges.empty()) return;
+          
+              void* tessellator = reinterpret_cast<void*>(tess);
+              const int vertices = static_cast<int>(std::min<std::size_t>(
+                  edges.size() * 2, kMaxRenderedVertices));
+          
+              // Primitive 4 is the line-list mode used by current BedrockTools world
+              // drawing modules.
+              g_tessBegin(tessellator, nullptr, 4, vertices, 0);
+              g_tessColor(tessellator, 0.25f, 1.0f, 0.35f, 0.82f);
+          
+              int emitted = 0;
+              for (const auto& edge : edges) {
+                  if (emitted + 2 > vertices) break;
+          
+                  const float ax = edge.a.x - camX;
+                  const float ay = edge.a.y - camY + 0.04f;
+                  const float az = edge.a.z - camZ;
+                  const float bx = edge.b.x - camX;
+                  const float by = edge.b.y - camY + 0.04f;
+                  const float bz = edge.b.z - camZ;
+          
+                  g_tessVertex(tessellator, ax, ay, az);
+                  g_tessVertex(tessellator, bx, by, bz);
+                  emitted += 2;
+              }
+          
+              char pad[0x58]{};
+              g_renderMesh(screenContext, tessellator, material, pad);
+              ++g_renderedFrameCount;
+          }
+          
+          bool resolveRuntime() {
+              if (g_resolving.exchange(true, std::memory_order_acq_rel)) return false;
+          
+              const auto resolved = pl::memory::resolveSignatures({
+                  std::string(kSigNormalTick),
+                  std::string(kSigRenderLevel),
+                  std::string(kSigTessBegin),
+                  std::string(kSigTessColor),
+                  std::string(kSigTessVertex),
+                  std::string(kSigRenderMesh2),
+                  std::string(kSigGetBlock),
+                  std::string(kSigSolidBlock)
+              }, "libminecraftpe.so");
+          
+              const auto addr = [&](std::string_view signature) -> std::uintptr_t {
+                  return resolvedAddress(resolved, signature);
+              };
+          
+              const auto tick = addr(kSigNormalTick);
+              const auto render = addr(kSigRenderLevel);
+              const auto tessBegin = addr(kSigTessBegin);
+              const auto tessColor = addr(kSigTessColor);
+              const auto tessVertex = addr(kSigTessVertex);
+              const auto renderMesh = addr(kSigRenderMesh2);
+              const auto getBlock = addr(kSigGetBlock);
+              const auto solid = addr(kSigSolidBlock);
+          
+              g_tessBegin = reinterpret_cast<TessBeginFn>(tessBegin);
+              g_tessColor = reinterpret_cast<TessColorFn>(tessColor);
+              g_tessVertex = reinterpret_cast<TessVertexFn>(tessVertex);
+              g_renderMesh = reinterpret_cast<RenderMeshFn>(renderMesh);
+              g_getBlock = reinterpret_cast<GetBlockFn>(getBlock);
+              g_isSolid = reinterpret_cast<IsSolidBlockFn>(solid);
+          
+              if (!tick || !render || !g_tessBegin || !g_tessColor || !g_tessVertex || !g_renderMesh || !g_isSolid) {
+                  g_resolving.store(false, std::memory_order_release);
+                  return false;
+              }
+          
+              bool ok = true;
+          
+              if (!g_tickHook.installed()) {
+                  g_tickHook = pl::memory::HookHandle(
+                      reinterpret_cast<void*>(tick),
+                      reinterpret_cast<void*>(+[](void* actor) {
+                          if (actor) g_localPlayer.store(actor, std::memory_order_release);
+                          if (g_tickOriginal) g_tickOriginal(actor);
+          
+                          // Only sample once for the actual local player; NormalTick is
+                          // called for many actors.
+                          if (actor && actor == g_localPlayer.load(std::memory_order_acquire)) {
+                              sampleOneNearbyColumn(actor);
+                          }
+                      }),
+                      reinterpret_cast<void**>(&g_tickOriginal));
+                  ok = ok && g_tickHook.installed();
+              }
+          
+              if (!g_renderHook.installed()) {
+                  g_renderHook = pl::memory::HookHandle(
+                      reinterpret_cast<void*>(render),
+                      reinterpret_cast<void*>(+[](void* levelRenderer, void* screenContext, void* a3) {
+                          ++g_frameCount;
+                          if (g_renderLevelOriginal) g_renderLevelOriginal(levelRenderer, screenContext, a3);
+                          renderHeightField(levelRenderer, screenContext);
+                      }),
+                      reinterpret_cast<void**>(&g_renderLevelOriginal));
+                  ok = ok && g_renderHook.installed();
+              }
+          
+              g_renderHooked.store(ok, std::memory_order_release);
+              g_runtimeReady.store(ok, std::memory_order_release);
+              g_resolving.store(false, std::memory_order_release);
+              return ok;
+          }
+          
+          void* dlopenDetour(const char* filename, int flags) {
+              void* handle = g_dlopenOriginal ? g_dlopenOriginal(filename, flags) : nullptr;
+              if (handle && filename && std::string_view(filename).find("libminecraftpe.so") != std::string_view::npos) {
+                  resolveRuntime();
+              }
+              return handle;
+          }
+          
+          bool installWhenReady() {
+              void* minecraft = dlopen("libminecraftpe.so", RTLD_NOW | RTLD_NOLOAD);
+              if (minecraft) {
+                  const bool ok = resolveRuntime();
+                  dlclose(minecraft);
+                  return ok;
+              }
+          
+              void* libdl = dlopen("libdl.so", RTLD_NOW | RTLD_NOLOAD);
+              if (!libdl) libdl = dlopen("libdl.so", RTLD_NOW);
+              if (!libdl) return false;
+          
+              void* sym = dlsym(libdl, "dlopen");
+              if (sym && !g_dlopenHook.installed()) {
+                  g_dlopenHook = pl::memory::HookHandle(
+                      sym,
+                      reinterpret_cast<void*>(dlopenDetour),
+                      reinterpret_cast<void**>(&g_dlopenOriginal));
+              }
+              dlclose(libdl);
+              return false;
+          }
+          
+          class InfiniteHorizonMod {
+          public:
+              static InfiniteHorizonMod& instance() {
+                  static InfiniteHorizonMod mod;
+                  return mod;
+              }
+          
+              InfiniteHorizonMod() : mSelf(*ll::mod::NativeMod::current()) {}
+          
+              ll::mod::NativeMod& self() { return mSelf; }
+          
+              bool load() {
+                  std::error_code ec;
+                  g_store.setRoot(self().getDataDir() / "lod");
+                  std::filesystem::create_directories(g_dataRoot, ec);
+                  g_store.load();
+                  g_store.startWorker();
+                  self().getLogger().info("Infinite Horizon 0.2.0 loaded");
+                  self().getLogger().info("Cached terrain samples: {}", g_store.size());
+                  installWhenReady();
+                  return true;
+              }
+          
+              bool enable() {
+                  self().getLogger().info("Infinite Horizon 0.2.0 enabled");
+                  installWhenReady();
+                  return true;
+              }
+          
+              bool disable() {
+                  self().getLogger().info("Infinite Horizon 0.2.0 saving");
+                  g_store.stopAndFlush();
+                  return true;
+              }
+          
+              bool unload() {
+                  self().getLogger().info(
+                      "Infinite Horizon 0.2.0 unloaded; frames={} rendered={} samples={}",
+                      g_frameCount.load(), g_renderedFrameCount.load(), g_sampleCount.load());
+                  return true;
+              }
+          
+          private:
+              ll::mod::NativeMod& mSelf;
+          };
+          
+          } // namespace
+          
+          PL_REGISTER_MOD(InfiniteHorizonMod, InfiniteHorizonMod::instance())
+          CPP_EOF
 
           echo "Project created."
           find project -maxdepth 2 -type f -print
@@ -259,7 +724,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
           cmake -S project \
             -B project/build-arm64-v8a \
             -G Ninja \
@@ -270,38 +734,30 @@ jobs:
             -DMOD_ID=infinite_horizon \
             -DMOD_NAME="Infinite Horizon" \
             -DMOD_AUTHOR="AQ Explains" \
-            -DMOD_VERSION=0.1.0 \
+            -DMOD_VERSION=0.2.0 \
             -DMOD_LIBRARY_NAME=infinite_horizon \
-            '-DMOD_MINECRAFT_VERSIONS=["1.26.*"]'
+            '-DMOD_MINECRAFT_VERSIONS=["1.26.5X.X"]'
 
       - name: Build package
         shell: bash
         run: |
           set -e
-
-          cmake --build project/build-arm64-v8a \
-            --target levi_package \
-            --parallel 2
+          cmake --build project/build-arm64-v8a --target levi_package --parallel 2
 
       - name: Verify package
         shell: bash
         run: |
           set -e
-
-          PACK=$(find project/build-arm64-v8a \
-            -maxdepth 1 \
-            -type f \
-            -name "*.levipack" \
-            | head -n 1)
-
+          PACK=$(find project/build-arm64-v8a -maxdepth 1 -type f -name "*.levipack" | head -n 1)
           test -n "$PACK"
-
-          echo "SUCCESS:"
-          echo "$PACK"
+          unzip -l "$PACK"
+          test "$(unzip -Z1 "$PACK" | grep -c 'libinfinite_horizon.so')" -eq 1
+          test "$(unzip -Z1 "$PACK" | grep -c 'manifest.json')" -eq 1
+          echo "Verified: $PACK"
 
       - name: Upload LeviPack
         uses: actions/upload-artifact@v4
         with:
-          name: infinite-horizon-0.1.0-arm64
+          name: infinite-horizon-0.2.0-arm64
           path: project/build-arm64-v8a/*.levipack
           if-no-files-found: error
