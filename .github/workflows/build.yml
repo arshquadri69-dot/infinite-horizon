@@ -562,16 +562,21 @@ jobs:
           bool resolveRuntime() {
               if (g_resolving.exchange(true, std::memory_order_acq_rel)) return false;
           
-              const auto resolved = pl::memory::resolveSignatures({
-                  std::string(kSigNormalTick),
-                  std::string(kSigRenderLevel),
-                  std::string(kSigTessBegin),
-                  std::string(kSigTessColor),
-                  std::string(kSigTessVertex),
-                  std::string(kSigRenderMesh2),
-                  std::string(kSigGetBlock),
-                  std::string(kSigSolidBlock)
-              }, "libminecraftpe.so");
+          const std::vector<std::string> signatures = {
+             std::string(kSigNormalTick),
+           std::string(kSigRenderLevel),
+           std::string(kSigTessBegin),
+              std::string(kSigTessColor),
+              std::string(kSigTessVertex),
+          std::string(kSigRenderMesh2),
+          std::string(kSigGetBlock),
+          std::string(kSigSolidBlock)
+          };
+
+          const auto resolved = pl::memory::resolveSignatures(
+            std::span<const std::string>(signatures),
+            "libminecraftpe.so"
+                  );
           
               const auto addr = [&](std::string_view signature) -> std::uintptr_t {
                   return resolvedAddress(resolved, signature);
